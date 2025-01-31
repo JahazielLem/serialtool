@@ -1,9 +1,9 @@
 import serial
 import argparse
 import sys
-import queue
 import threading
 import time
+from datetime import datetime
 from prompt_toolkit import PromptSession
 from prompt_toolkit.patch_stdout import patch_stdout
 from prompt_toolkit.key_binding import KeyBindings
@@ -23,6 +23,7 @@ class SerialPort:
     def __init__(self):
       self.serial_device = serial.Serial()
       self.serial_device.baudrate = DEFAULT_BAUDRATE
+      self.serial_device.dsrdtr = True
 
     def set_serial_port(self, port):
       self.serial_device.port = port
@@ -43,32 +44,33 @@ class SerialPort:
       return self.serial_device.port
 
     def open(self):
-        try:
-            if not self.is_connected():
-                self.serial_device.open()
-                self.resetBuffer()
-        except serial.SerialException as e:
-            print("Error: %s" % e)
-            sys.exit(1)
+      try:
+          if not self.is_connected():
+              self.serial_device.open()
+              self.resetBuffer()
+      except serial.SerialException as e:
+          print("Error: %s" % e)
+          sys.exit(1)
 
     def close(self):
-        if self.is_connected():
-            try:
-                self.serial_device.close()
-            except serial.SerialException as e:
-                print("Error: %s" % e)
-                sys.exit(1)
+      if self.is_connected():
+          try:
+              self.serial_device.close()
+          except serial.SerialException as e:
+              print("Error: %s" % e)
+              sys.exit(1)
 
     def recv(self):
-        try:
-            return self.serial_device.readline().decode().strip()
-        except serial.SerialException as e:
-            print(f"Error recv: {e}")
-            return ""
+      if not self.is_connected():
+        return None
+      try:
+        return self.serial_device.readline().decode().strip()
+      except Exception as e:
+        self.serial_device.close()
 
     def transmit(self, data):
-        message = f"{data}\r\n"
-        self.serial_device.write(message.encode())
+      message = f"{data}\r\n"
+      self.serial_device.write(message.encode())
 
 class SerialMonitor:
   def __init__(self):
@@ -76,6 +78,11 @@ class SerialMonitor:
     self.prompt_session = PromptSession()
     self.serial_device = SerialPort()
     self.running_app = True
+    self.configuration = {
+       "timestamp": True,
+       "hex": True,
+       "ascii": True,
+    }
     self.prompt_char = 'cmd ?> '
     self.prompt_title = "Data:"
 
@@ -98,7 +105,7 @@ class SerialMonitor:
 
     @bindings.add("c-c")
     def _(event):
-        self.runningApp = False
+        self.close()
         event.app.exit()
 
     @bindings.add("c-l")
@@ -111,12 +118,27 @@ class SerialMonitor:
     self.parser.add_argument("port", help="Serial port")
     self.parser.add_argument("-b", "--baudrate", help="Baudrate", type=int, default=DEFAULT_BAUDRATE)
   
+  def __monitor_show_data(self, data):
+    message_constructor = ""
+    if self.configuration["timestamp"]:
+      time_now = datetime.now().strftime("%H:%M:%S")
+      message_constructor += f"{time_now} "
+    
+    if self.configuration["hex"]:
+      byte_data = data.encode()
+      message_constructor += f" {byte_data.hex()}"
+    
+    if self.configuration["ascii"]:
+      message_constructor += f" {data}"
+
+    self.output_buffer.text += f"\n{message_constructor}"
+    self.app.invalidate()
+  
   def __rx_serial_worker(self):
     while self.running_app:
       data = self.serial_device.recv()
       if data:
-        self.output_buffer.text += f"\n{data}"
-        self.app.invalidate()
+        self.__monitor_show_data(data)
   
   def send_input(self, buffer):
     text = buffer.text.strip()
@@ -134,6 +156,8 @@ class SerialMonitor:
 
   def close(self):
     self.running_app = False
+    if self.serial_device.is_connected():
+       self.serial_device.close()
     if self.prompt_worker and self.prompt_worker.is_alive():
       self.prompt_worker.join(timeout=2)
     if self.serial_worker and self.serial_worker.is_alive():
@@ -147,7 +171,7 @@ class SerialMonitor:
     self.rx_worker()
     self.run_interface()
     self.close()
-    self.serial_device.close()
+    
 
 
 
