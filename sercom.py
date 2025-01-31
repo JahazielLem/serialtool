@@ -1,20 +1,29 @@
+"""
+Author: Kevin Leon 
+Date:   Jan 31 2025
+
+Description: A serial monitor for communication with serial devices.
+
+STILL IN DEVELOPMENT!
+"""
 import serial
 import argparse
 import sys
+import os
 import threading
-import time
+import textwrap
 from datetime import datetime
 from prompt_toolkit import PromptSession
 from prompt_toolkit.patch_stdout import patch_stdout
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.application import Application
 from prompt_toolkit.layout import Layout
-from prompt_toolkit.layout.containers import HSplit, Window
-from prompt_toolkit.layout.controls import FormattedTextControl
+from prompt_toolkit.layout.containers import HSplit, VSplit, Window
+from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.widgets import TextArea, Frame
+from prompt_toolkit.shortcuts import set_title
 
 DEFAULT_BAUDRATE = 115200
-
 
 class SerialError(Exception):
   pass
@@ -74,7 +83,7 @@ class SerialPort:
 
 class SerialMonitor:
   def __init__(self):
-    self.parser = argparse.ArgumentParser()
+    self.parser = argparse.ArgumentParser(description="Serial tool ")
     self.prompt_session = PromptSession()
     self.serial_device = SerialPort()
     self.running_app = True
@@ -84,16 +93,23 @@ class SerialMonitor:
        "ascii": True,
     }
     self.prompt_char = 'cmd ?> '
-    self.prompt_title = "Data:"
+    self.prompt_title = "ASCII Data:"
 
     self.prompt_worker = None
     self.__parser_args()
 
     # Windows style
     self.output_buffer = TextArea(style="bg:default fg:#ffffff")
-    self.input_field = TextArea(height=1, prompt=self.prompt_char, multiline=False, focus_on_click=True, accept_handler=self.send_input, style="bg:default fg:#00c0de" )
+    self.output_timestamp = TextArea(style="bg:default fg:#ffffff")
+    self.output_hex = TextArea(style="bg:default fg:#ffffff")
+    self.input_field = TextArea(height=2, prompt=self.prompt_char, multiline=False, 
+    focus_on_click=True, accept_handler=self.send_input, style="bg:default fg:#00c0de")
     self.container = HSplit([
-        Frame(self.output_buffer, title=self.prompt_title),
+        VSplit([
+          Frame(self.output_timestamp, title="Time", width=int(os.get_terminal_size().columns*(1/16))),
+          Frame(self.output_hex, title="Hex", width=int(os.get_terminal_size().columns*(4/16))),
+          Frame(self.output_buffer, title=self.prompt_title),
+        ]),
         self.input_field
     ])
     self.layout = Layout(self.container)
@@ -119,19 +135,24 @@ class SerialMonitor:
     self.parser.add_argument("-b", "--baudrate", help="Baudrate", type=int, default=DEFAULT_BAUDRATE)
   
   def __monitor_show_data(self, data):
-    message_constructor = ""
-    if self.configuration["timestamp"]:
-      time_now = datetime.now().strftime("%H:%M:%S")
-      message_constructor += f"{time_now} "
+    row_cr_count = 0
     
     if self.configuration["hex"]:
-      byte_data = data.encode()
-      message_constructor += f" {byte_data.hex()}"
+      hex_data = data.encode().hex()
+      # formatted_data = ":".join([hex_data[i : i+2] for i in range(0, len(hex_data), 2)])
+      #self.output_hex.text += f"\n{formatted_data}"
+      hex_blocks = textwrap.wrap(hex_data, 32)
+      row_cr_count = len(hex_blocks)
+      formatted_hex = "\n".join([":".join(textwrap.wrap(block,2)) for block in hex_blocks])
+      self.output_hex.text += f"\n{formatted_hex}"
     
-    if self.configuration["ascii"]:
-      message_constructor += f" {data}"
+    if self.configuration["timestamp"]:
+      time_now = datetime.now().strftime("%H:%M:%S")
+      self.output_timestamp.text += "\n" + time_now + "\n" * (row_cr_count - 1) 
 
-    self.output_buffer.text += f"\n{message_constructor}"
+    if self.configuration["ascii"]:
+      self.output_buffer.text += "\n"+ data + "\n" * (row_cr_count - 1)
+    
     self.app.invalidate()
   
   def __rx_serial_worker(self):
@@ -167,16 +188,13 @@ class SerialMonitor:
     args = self.parser.parse_args()
     self.serial_device.set_serial_port(args.port)
     self.serial_device.open()
-    self.prompt_title = f"{self.serial_device.get_serial_port()} - {self.prompt_title}"
+    set_title(f"{self.serial_device.get_serial_port()} - {self.prompt_title}")
     self.rx_worker()
     self.run_interface()
     self.close()
-    
 
 
-
-
-if __name__ == "__main__":
+def main():
   monitor = SerialMonitor()
   try:
     monitor.main()
@@ -184,3 +202,6 @@ if __name__ == "__main__":
     print("Exiting...")
   finally:
     monitor.close()
+
+if __name__ == "__main__":
+  main()
