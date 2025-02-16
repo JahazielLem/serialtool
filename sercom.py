@@ -3,7 +3,7 @@ import argparse
 import sys
 import threading
 import time
-import chardet
+from datetime import datetime
 from prompt_toolkit import PromptSession
 from prompt_toolkit.patch_stdout import patch_stdout
 
@@ -56,12 +56,10 @@ class SerialPort:
   
   def recv(self):
     try:
-      bytestream = self.serial_device.readline()
-      encoding = chardet.detect(bytestream)["encoding"]
-      return bytestream.decode(encoding, errors="replace").strip()
+      bytestream = self.serial_device.readline().decode().strip()
+      return bytestream
     except serial.SerialException as e:
       self.serial_alive = False
-      raise e
   
   def transmit(self, data):
     message = f"{data}\r\n"
@@ -70,7 +68,6 @@ class SerialPort:
   def reconnect(self):
     while not self.serial_alive:
       time.sleep(3)
-      print("Reconnecting")
       self.open()
 
 class SerialMonitor:
@@ -79,7 +76,7 @@ class SerialMonitor:
     self.prompt_session = PromptSession()
     self.serial_device = SerialPort()
     self.running_app = True
-    
+    self.cmd_char = ""
 
     self.prompt_worker = None
     self.serial_worker = None
@@ -93,7 +90,7 @@ class SerialMonitor:
     while self.running_app:
       try:
         with patch_stdout():
-          text = self.prompt_session.prompt('?> ')
+          text = self.prompt_session.prompt(self.cmd_char)
           self.serial_device.transmit(text)
       except (KeyboardInterrupt, EOFError):
         self.running_app = False
@@ -104,7 +101,8 @@ class SerialMonitor:
       try:
           data = self.serial_device.recv()
           if data:
-            print(data)
+            time_now = datetime.now().strftime("%H:%M:%S")
+            print(f"{time_now}\t{data}")
       except Exception:
         self.serial_device.close()
         self.serial_device.reconnect()
@@ -124,12 +122,11 @@ class SerialMonitor:
     if self.serial_worker and self.serial_worker.is_alive():
       self.serial_worker.join(timeout=2)
       
-  
   def main(self):
     args = self.parser.parse_args()
-    print(args.port)
     self.serial_device.set_serial_port(args.port)
     self.serial_device.open()
+    self.cmd_char = f"[{args.port}] ?>"
     self.rx_worker()
     self.prompt()
     try:
@@ -138,9 +135,6 @@ class SerialMonitor:
     finally:
       self.close()
       self.serial_device.close()
-
-
-
 
 if __name__ == "__main__":
   monitor = SerialMonitor()
