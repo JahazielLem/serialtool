@@ -9,17 +9,15 @@ STILL IN DEVELOPMENT!
 import serial
 import argparse
 import sys
-import os
+import time
 import threading
-import textwrap
+import chardet
 from datetime import datetime
 from prompt_toolkit import PromptSession
-from prompt_toolkit.patch_stdout import patch_stdout
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.application import Application
 from prompt_toolkit.layout import Layout
-from prompt_toolkit.layout.containers import HSplit, VSplit, Window
-from prompt_toolkit.formatted_text import HTML
+from prompt_toolkit.layout.containers import HSplit
 from prompt_toolkit.widgets import TextArea, Frame
 from prompt_toolkit.shortcuts import set_title
 
@@ -32,7 +30,7 @@ class SerialPort:
     def __init__(self):
       self.serial_device = serial.Serial()
       self.serial_device.baudrate = DEFAULT_BAUDRATE
-      self.serial_device.dsrdtr = True
+      self.serial_alive = True
 
     def set_serial_port(self, port):
       self.serial_device.port = port
@@ -57,6 +55,7 @@ class SerialPort:
           if not self.is_connected():
               self.serial_device.open()
               self.resetBuffer()
+              self.serial_alive = True
       except serial.SerialException as e:
           print("Error: %s" % e)
           sys.exit(1)
@@ -65,6 +64,7 @@ class SerialPort:
       if self.is_connected():
           try:
               self.serial_device.close()
+              self.serial_alive = False
           except serial.SerialException as e:
               print("Error: %s" % e)
               sys.exit(1)
@@ -73,13 +73,19 @@ class SerialPort:
       if not self.is_connected():
         return None
       try:
-        return self.serial_device.readline().decode().strip()
-      except Exception as e:
-        self.serial_device.close()
+        bytestream = self.serial_device.readline().decode().strip()
+        return bytestream
+      except Exception:
+        self.serial_alive = False
 
     def transmit(self, data):
       message = f"{data}\r\n"
       self.serial_device.write(message.encode())
+    
+    def reconnect(self):
+      while not self.serial_alive:
+        time.sleep(3)
+        self.open()
 
 class SerialMonitor:
   def __init__(self):
@@ -99,22 +105,16 @@ class SerialMonitor:
     self.__parser_args()
 
     # Windows style
-    self.output_buffer = TextArea(style="bg:default fg:#ffffff")
-    self.output_timestamp = TextArea(style="bg:default fg:#ffffff")
-    self.output_hex = TextArea(style="bg:default fg:#ffffff")
+    self.output_buffer = TextArea(style="bg:default fg:#ffffff", line_numbers=True, read_only=True)
     self.input_field = TextArea(height=2, prompt=self.prompt_char, multiline=False, 
     focus_on_click=True, accept_handler=self.send_input, style="bg:default fg:#00c0de")
     self.container = HSplit([
-        VSplit([
-          Frame(self.output_timestamp, title="Time", width=int(os.get_terminal_size().columns*(1/16))),
-          Frame(self.output_hex, title="Hex", width=int(os.get_terminal_size().columns*(4/16))),
-          Frame(self.output_buffer, title=self.prompt_title),
-        ]),
+        Frame(self.output_buffer, title=self.prompt_title),
         self.input_field
     ])
     self.layout = Layout(self.container)
     self.bindings = self.__setup_keybindings()
-    self.app = Application(layout=self.layout, key_bindings=self.bindings, full_screen=True)
+    self.app = Application(layout=self.layout, key_bindings=self.bindings, full_screen=False)
   
   def __setup_keybindings(self):
     bindings = KeyBindings()
@@ -135,31 +135,21 @@ class SerialMonitor:
     self.parser.add_argument("-b", "--baudrate", help="Baudrate", type=int, default=DEFAULT_BAUDRATE)
   
   def __monitor_show_data(self, data):
-    row_cr_count = 0
-    
-    if self.configuration["hex"]:
-      hex_data = data.encode().hex()
-      # formatted_data = ":".join([hex_data[i : i+2] for i in range(0, len(hex_data), 2)])
-      #self.output_hex.text += f"\n{formatted_data}"
-      hex_blocks = textwrap.wrap(hex_data, 32)
-      row_cr_count = len(hex_blocks)
-      formatted_hex = "\n".join([":".join(textwrap.wrap(block,2)) for block in hex_blocks])
-      self.output_hex.text += f"\n{formatted_hex}"
-    
     if self.configuration["timestamp"]:
       time_now = datetime.now().strftime("%H:%M:%S")
-      self.output_timestamp.text += "\n" + time_now + "\n" * (row_cr_count - 1) 
-
-    if self.configuration["ascii"]:
-      self.output_buffer.text += "\n"+ data + "\n" * (row_cr_count - 1)
-    
+      self.output_buffer.text += "[" + time_now + "]\t"
+    self.output_buffer.text += data + "\n"
     self.app.invalidate()
   
   def __rx_serial_worker(self):
     while self.running_app:
-      data = self.serial_device.recv()
-      if data:
-        self.__monitor_show_data(data)
+      try:
+        data = self.serial_device.recv()
+        if data:
+          self.__monitor_show_data(data)
+      except Exception:
+        self.serial_device.close()
+        self.serial_device.reconnect()
   
   def send_input(self, buffer):
     text = buffer.text.strip()
@@ -177,12 +167,12 @@ class SerialMonitor:
 
   def close(self):
     self.running_app = False
-    if self.serial_device.is_connected():
-       self.serial_device.close()
     if self.prompt_worker and self.prompt_worker.is_alive():
       self.prompt_worker.join(timeout=2)
     if self.serial_worker and self.serial_worker.is_alive():
       self.serial_worker.join(timeout=2)
+    if self.serial_device.is_connected():
+       self.serial_device.close()
   
   def main(self):
     args = self.parser.parse_args()
