@@ -4,12 +4,14 @@ from datetime import datetime
 from prompt_toolkit import PromptSession
 from prompt_toolkit.patch_stdout import patch_stdout
 from .serialDevice import SerialPort
+from .confParser import Config
 
 
 class SerialMonitor:
   def __init__(self):
     self.prompt_session = PromptSession()
     self.serial_device = SerialPort()
+    self.config = Config()
     self.running_app = True
     self.cmd_char = ""
     self.data_callback = None
@@ -32,7 +34,10 @@ class SerialMonitor:
           data = self.serial_device.recv()
           if data:
             time_now = datetime.now().strftime("%H:%M:%S")
-            print(data)
+            if self.config.get_terminal_config("timestamp") != "None":
+              print(f"{time_now}\t {data}")
+            else:
+              print(data)
             if self.data_callback:
               self.data_callback(data)
       except Exception:
