@@ -12,7 +12,7 @@ class SerialMonitor:
     self.serial_device = SerialPort()
     self.running_app = True
     self.cmd_char = ""
-
+    self.data_callback = None
     self.prompt_worker = None
     self.serial_worker = None
   
@@ -32,11 +32,16 @@ class SerialMonitor:
           data = self.serial_device.recv()
           if data:
             time_now = datetime.now().strftime("%H:%M:%S")
-            print(f"{time_now}\t{data}")
+            print(data)
+            if self.data_callback:
+              self.data_callback(data)
       except Exception:
         self.serial_device.close()
         self.serial_device.reconnect()
-    
+
+  def register_callback(self, callback):
+    self.data_callback = callback  
+  
   def rx_worker(self):
     self.serial_worker = threading.Thread(target=self.__rx_serial_worker, daemon=True)
     self.serial_worker.start()

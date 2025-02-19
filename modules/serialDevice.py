@@ -50,10 +50,15 @@ class SerialPort:
   
   def recv(self):
     try:
-      bytestream = self.serial_device.readline().decode().strip()
-      return bytestream
-    except serial.SerialException as e:
+      if self.serial_device.in_waiting > 0:
+        bytestream = self.serial_device.read_until(b'\n').decode().strip()
+        return bytestream
+      else:
+        return None
+    except (serial.SerialException, UnicodeDecodeError) as e:
       self.serial_alive = False
+      return None
+
   
   def transmit(self, data):
     message = f"{data}\r\n"
