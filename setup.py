@@ -1,15 +1,15 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="sercom",
+    name="simplecom",
     version="0.1.0",
     description="Serial Monitor",
-    author="Kevin Leon",
+    author="Jahaziel Leon",
     url="https://github.com/JahazielLem/serialtool",
-    py_modules=["sercom"],
+    py_modules=["simplecom"],
     entry_points={
         "console_scripts": [
-            "sercom=sercom:main",
+            "simplecom=simplecom:main",
         ],
     },
     install_requires=["pyserial", "prompt_toolkit"],
