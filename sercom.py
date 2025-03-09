@@ -1,19 +1,25 @@
-import argparse
-from modules.serialDevice import DEFAULT_BAUDRATE
-from modules.serialMonitor import SerialMonitor
+import time
+import queue
+import simplecom
+
+
 
 if __name__ == "__main__":
-  parser = argparse.ArgumentParser()
-  parser.add_argument("port", help="Serial port")
-  parser.add_argument("-b", "--baudrate", help="Baudrate", type=int, default=DEFAULT_BAUDRATE)
-  args = parser.parse_args()
+  catwanQueue = queue.Queue()
+  catsnifQueue = queue.Queue()
   
-  serial_monitor = SerialMonitor()
-  serial_monitor.serial_device.set_serial_port(args.port)
-  serial_monitor.serial_device.set_baudrate(args.baudrate)
+  catwanMonitor = simplecom.SerialMonitor("/dev/tty.usbmodem21101", rx_queue=catwanQueue, prompt=False)
+  catsnfMonitor = simplecom.SerialMonitor("/dev/tty.usbmodem212401", 921600, catsnifQueue)
+
   try:
-    serial_monitor.main()
-  except Exception as e:
-    raise e
-  finally:
-    serial_monitor.close()
+    catwanMonitor.main()
+    catsnfMonitor.main()
+    while True:
+      if not catwanQueue.empty():
+        print(f"Catwan: {catwanQueue.get()}")
+      if not catsnifQueue.empty():
+        print(f"Sniffe: {catsnifQueue.get()}")
+      time.sleep(0.1)
+  except KeyboardInterrupt:
+    catwanMonitor.close()
+    catsnfMonitor.close()
