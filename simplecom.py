@@ -114,14 +114,14 @@ class SerialMonitor:
     self.rx_queue = rx_queue
   
   def __prompt_worker(self):
-    while self.running_app:
-      try:
-        with patch_stdout():
+    with patch_stdout():
+      while self.running_app:
+        try:
           text = self.prompt_session.prompt(self.cmd_char)
           self.serial_device.transmit(text)
-      except (KeyboardInterrupt, EOFError):
-        self.running_app = False
-        break
+        except (KeyboardInterrupt, EOFError):
+          self.running_app = False
+          break
   
   def __rx_serial_worker(self):
     while self.running_app:
@@ -132,6 +132,7 @@ class SerialMonitor:
       except Exception as e:
         print(e)
         self.serial_device.close()
+        time.sleep(1)
         self.serial_device.reconnect()
     
   def show_data(self):
@@ -145,15 +146,15 @@ class SerialMonitor:
         print("Error Queue: ", e)
     
   def rx_worker(self):
-    self.serial_worker = threading.Thread(target=self.__rx_serial_worker, daemon=True)
+    self.serial_worker = threading.Thread(target=self.__rx_serial_worker)
     self.serial_worker.start()
 
   def prompt(self):
-    self.prompt_worker = threading.Thread(target=self.__prompt_worker, daemon=True)
+    self.prompt_worker = threading.Thread(target=self.__prompt_worker)
     self.prompt_worker.start()
   
   def queue_worker(self):
-    self.queu_worker = threading.Thread(target=self.show_data, daemon=True)
+    self.queu_worker = threading.Thread(target=self.show_data)
     self.queu_worker.start()
 
   def close(self):
@@ -187,7 +188,7 @@ def main():
   try:
     serial_monitor.main()
     serial_monitor.queue_worker()
-    while True:
+    while serial_monitor.running_app:
       time.sleep(1)
   except KeyboardInterrupt:
     serial_monitor.close()
